@@ -1,0 +1,219 @@
+import React, { useState } from "https://esm.sh/react@18.2.0";
+import { createRoot } from "https://esm.sh/react-dom@18.2.0/client";
+
+// Steganography utility functions
+function encodeMessage(imageData: ImageData, message: string): ImageData {
+  const data = new Uint8ClampedArray(imageData.data);
+  const encoder = new TextEncoder();
+  const messageBytes = encoder.encode(message);
+  
+  // Encode message length first
+  const lengthBytes = new Uint8Array(4);
+  new DataView(lengthBytes.buffer).setUint32(0, messageBytes.length, true);
+  
+  let byteIndex = 0;
+  let dataIndex = 0;
+  
+  // Encode length bytes
+  for (let i = 0; i < 4; i++) {
+    for (let bit = 0; bit < 8; bit++) {
+      data[dataIndex] = (data[dataIndex] & 0xFE) | ((lengthBytes[i] >> bit) & 1);
+      dataIndex += 4;
+    }
+  }
+  
+  // Encode message bytes
+  for (let i = 0; i < messageBytes.length; i++) {
+    for (let bit = 0; bit < 8; bit++) {
+      data[dataIndex] = (data[dataIndex] & 0xFE) | ((messageBytes[i] >> bit) & 1);
+      dataIndex += 4;
+    }
+  }
+  
+  return new ImageData(data, imageData.width, imageData.height);
+}
+
+function decodeMessage(imageData: ImageData): string {
+  const data = imageData.data;
+  let dataIndex = 0;
+  
+  // Decode message length
+  const lengthBytes = new Uint8Array(4);
+  for (let i = 0; i < 4; i++) {
+    let byte = 0;
+    for (let bit = 0; bit < 8; bit++) {
+      byte |= (data[dataIndex] & 1) << bit;
+      dataIndex += 4;
+    }
+    lengthBytes[i] = byte;
+  }
+  
+  const messageLength = new DataView(lengthBytes.buffer).getUint32(0, true);
+  
+  // Decode message bytes
+  const messageBytes = new Uint8Array(messageLength);
+  for (let i = 0; i < messageLength; i++) {
+    let byte = 0;
+    for (let bit = 0; bit < 8; bit++) {
+      byte |= (data[dataIndex] & 1) << bit;
+      dataIndex += 4;
+    }
+    messageBytes[i] = byte;
+  }
+  
+  return new TextDecoder().decode(messageBytes);
+}
+
+function App() {
+  const [originalImage, setOriginalImage] = useState<File | null>(null);
+  const [encodedImage, setEncodedImage] = useState<string | null>(null);
+  const [secretMessage, setSecretMessage] = useState('');
+  const [decodedMessage, setDecodedMessage] = useState('');
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) setOriginalImage(file);
+  };
+
+  const encodeImage = async () => {
+    if (!originalImage) return;
+    
+    const img = new Image();
+    img.src = URL.createObjectURL(originalImage);
+    
+    await new Promise(resolve => { img.onload = resolve; });
+    
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    
+    const ctx = canvas.getContext('2d')!;
+    ctx.drawImage(img, 0, 0);
+    
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const encodedImageData = encodeMessage(imageData, secretMessage);
+    
+    ctx.putImageData(encodedImageData, 0, 0);
+    setEncodedImage(canvas.toDataURL());
+  };
+
+  const decodeImage = async () => {
+    if (!encodedImage) return;
+    
+    const img = new Image();
+    img.src = encodedImage;
+    
+    await new Promise(resolve => { img.onload = resolve; });
+    
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    
+    const ctx = canvas.getContext('2d')!;
+    ctx.drawImage(img, 0, 0);
+    
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const message = decodeMessage(imageData);
+    
+    setDecodedMessage(message);
+  };
+
+  return (
+    <div style={{ 
+      fontFamily: 'Arial', 
+      maxWidth: '600px', 
+      margin: 'auto', 
+      padding: '20px',
+      textAlign: 'center'
+    }}>
+      <h1>🕵️ Image Steganography</h1>
+      
+      <input 
+        type="file" 
+        accept="image/*" 
+        onChange={handleImageUpload} 
+      />
+      
+      <div>
+        <textarea 
+          placeholder="Enter secret message" 
+          value={secretMessage}
+          onChange={(e) => setSecretMessage(e.target.value)}
+          style={{ width: '100%', marginTop: '10px' }}
+        />
+      </div>
+      
+      <button 
+        onClick={encodeImage} 
+        disabled={!originalImage || !secretMessage}
+        style={{ margin: '10px' }}
+      >
+        Hide Message in Image
+      </button>
+      
+      {encodedImage && (
+        <div>
+          <h3>Encoded Image</h3>
+          <img 
+            src={encodedImage} 
+            alt="Encoded" 
+            style={{ maxWidth: '100%' }} 
+          />
+          <a 
+            href={encodedImage} 
+            download="encoded_image.png"
+          >
+            Download Encoded Image
+          </a>
+        </div>
+      )}
+      
+      <button 
+        onClick={decodeImage} 
+        disabled={!encodedImage}
+        style={{ margin: '10px' }}
+      >
+        Reveal Hidden Message
+      </button>
+      
+      {decodedMessage && (
+        <div>
+          <h3>Decoded Message</h3>
+          <p>{decodedMessage}</p>
+        </div>
+      )}
+      
+      <p style={{ fontSize: '0.8em', marginTop: '20px' }}>
+        <a 
+          href={import.meta.url.replace("esm.town", "val.town")} 
+          target="_top"
+        >
+          View Source
+        </a>
+      </p>
+    </div>
+  );
+}
+
+function client() {
+  createRoot(document.getElementById("root")).render(<App />);
+}
+if (typeof document !== "undefined") { client(); }
+
+export default async function server(request: Request): Promise<Response> {
+  return new Response(`
+    <html>
+      <head>
+        <title>Image Steganography</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+      </head>
+      <body>
+        <div id="root"></div>
+        <script src="https://esm.town/v/std/catch"></script>
+        <script type="module" src="${import.meta.url}"></script>
+      </body>
+    </html>
+  `, {
+    headers: { "content-type": "text/html" }
+  });
+}
